@@ -9,6 +9,11 @@ https://docs.djangoproject.com/en/5.1/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.1/ref/settings/
 """
+import os
+from dotenv import load_dotenv
+
+# Load the .env file
+load_dotenv()
 
 from pathlib import Path
 
@@ -158,14 +163,14 @@ SIMPLE_JWT = {
 
 # Enable email backend
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
-EMAIL_HOST = "smtp.gmail.com"
-EMAIL_PORT = 587
+# Email Credentials
+EMAIL_HOST = os.getenv('EMAIL_HOST')
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))  # Default to 587
 EMAIL_USE_TLS = True
-EMAIL_HOST_USER = "simar.content@gmail.com"
-EMAIL_HOST_PASSWORD = "llirwhlvirjgjhyl"  # Use the new 16-character password
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
 
-
-# Twilio API settings
-TWILIO_ACCOUNT_SID = "ACd2c2fb812cc3b8c0b399a5512a6eacb9"
-TWILIO_AUTH_TOKEN = "de97da3a917a230b57857e7a23aea058"
-TWILIO_PHONE_NUMBER = "+19513304884"
+# Twilio Credentials
+TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')
+TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')
+TWILIO_PHONE_NUMBER = os.getenv('TWILIO_PHONE_NUMBER')
