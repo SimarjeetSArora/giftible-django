@@ -11,8 +11,9 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from .models import CustomUser
 from django.utils import timezone
 from datetime import timedelta
-
-
+from django.core.files.base import ContentFile
+from django.core.files.uploadedfile import InMemoryUploadedFile
+from django.core.exceptions import ValidationError
 
 
 User = get_user_model()
@@ -21,13 +22,14 @@ User = get_user_model()
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)
     ngo_license = serializers.ImageField(required=False)
+    ngo_logo = serializers.ImageField(required=False)  # ✅ Add NGO Logo Field
     first_name = serializers.CharField(max_length=30)
     last_name = serializers.CharField(max_length=30)
 
 
     class Meta:
         model = User
-        fields = ('username', 'email', 'password', 'contact_number', 'is_ngo', 'ngo_license', 'first_name', 'last_name')
+        fields = ('username', 'email', 'password', 'contact_number', 'is_ngo', 'ngo_license', 'ngo_logo', 'first_name', 'last_name')
 
     def validate_email(self, value):
         """Ensure email is unique before registration."""
@@ -59,6 +61,9 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         """Create user but keep them inactive until verified."""
+        ngo_license = validated_data.pop('ngo_license', None)  # Extract and remove before creating user
+        ngo_logo = validated_data.pop('ngo_logo', None)
+
         user = CustomUser.objects.create_user(
             username=validated_data['username'],
             email=validated_data['email'],
@@ -67,12 +72,17 @@ class RegisterSerializer(serializers.ModelSerializer):
             is_ngo=validated_data.get('is_ngo', False),
             first_name=validated_data['first_name'],
             last_name=validated_data['last_name'],
-            is_active=False  # 🚨 User stays inactive until verified
+            is_active=False if validated_data.get('is_ngo', False) else False,  # 🚨 NGOs stay inactive until approved
+            is_approved=False if validated_data.get('is_ngo', False) else True  # 🚨 Admin approval required for NGOs
         )
 
-        # Assign NGO license if provided
-        if user.is_ngo and 'ngo_license' in validated_data:
-            user.ngo_license = validated_data['ngo_license']
+       # ✅ Assign file fields AFTER user creation
+        if user.is_ngo:
+            if isinstance(ngo_license, InMemoryUploadedFile):
+                user.ngo_license.save(ngo_license.name, ngo_license, save=True)
+        
+            if isinstance(ngo_logo, InMemoryUploadedFile):
+                user.ngo_logo.save(ngo_logo.name, ngo_logo, save=True)
 
         # ✅ Generate Email Verification Token
         user.email_verification_token = str(uuid.uuid4())
@@ -93,6 +103,31 @@ class RegisterSerializer(serializers.ModelSerializer):
         self.send_sms(user.contact_number, user.contact_otp)
 
         return user
+
+    def validate_ngo_logo(self, value):
+        allowed_types = ["image/png", "image/jpeg"]
+        max_size = 5 * 1024 * 1024  # 5MB limit
+        if value.content_type not in allowed_types:
+            raise ValidationError("Invalid file type. Allowed: PNG, JPG, JPEG.")
+
+        if value.size > max_size:
+            raise serializers.ValidationError("NGO Logo size must be less than 5MB.")
+        return value
+
+    def validate_ngo_license(value):
+        allowed_types = ["application/pdf", "image/png", "image/jpeg"]
+        max_size = 5 * 1024 * 1024  # 5MB
+
+        # Check file type
+        if value.content_type not in allowed_types:
+            raise ValidationError("Invalid file type. Allowed: PDF, PNG, JPG, JPEG.")
+
+        # Check file size
+        if value.size > max_size:
+            raise ValidationError("File too large. Maximum size allowed is 5MB.")
+
+        return value
+
 
     def send_email_verification(self, email, token):
         """Send email verification link."""
@@ -163,3 +198,20 @@ class PasswordResetSerializer(serializers.Serializer):
 
 class ResetPasswordSerializer(serializers.Serializer):
     new_password = serializers.CharField(write_only=True, min_length=8)
+
+class CustomUserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CustomUser
+        fields = ['first_name', 'last_name', 'email', 'contact_number', 'is_ngo', 'ngo_license']
+        read_only_fields = ['email','contact_number', 'is_ngo']  # Email, Contact Number and NGO status should not be editable
+
+    def update(self, instance, validated_data):
+    # Handle NGO license update (delete old file)
+        if 'ngo_license' in validated_data and instance.ngo_license:
+            instance.ngo_license.delete(save=False)
+
+        # Handle NGO logo update (delete old file)
+        if 'ngo_logo' in validated_data and instance.ngo_logo:
+            instance.ngo_logo.delete(save=False)
+
+        return super().update(instance, validated_data)

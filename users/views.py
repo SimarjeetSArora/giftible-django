@@ -1,19 +1,16 @@
-from rest_framework import generics, status
+from rest_framework import generics, status, permissions
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
-from .serializers import RegisterSerializer
-from .models import CustomUser
-from django.contrib.auth import authenticate
-from rest_framework_simplejwt.tokens import RefreshToken
-from .serializers import LoginSerializer
 from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
+from .serializers import RegisterSerializer, LoginSerializer, PasswordResetSerializer, CustomUserSerializer
+from .models import CustomUser
+from django.contrib.auth import authenticate, get_user_model
+from django.contrib.auth.tokens import default_token_generator
 from django.shortcuts import get_object_or_404
 from django.core.mail import send_mail
 from django.utils import timezone
-from django.contrib.auth.tokens import default_token_generator
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
-from django.contrib.auth import get_user_model
-from .serializers import PasswordResetSerializer
 
 
 
@@ -47,11 +44,15 @@ class RegisterView(generics.CreateAPIView):
             {
                 "message": response_message,
                 "user": {
+                    "id": user.id,
                     "username": user.username,
                     "email": user.email,
                     "contact_number": user.contact_number,
                     "is_ngo": user.is_ngo,
-                    "ngo_license": user.ngo_license.url if user.is_ngo and user.ngo_license else None
+                    "ngo_license": user.ngo_license.url if user.ngo_license else None,
+                    "ngo_logo": user.ngo_logo.url if user.ngo_logo else None,  # ✅ Add NGO logo URL
+                    "is_active": user.is_active,
+                    "is_approved": user.is_approved,
                 }
             },
             status=status.HTTP_201_CREATED
@@ -147,3 +148,34 @@ class ResetPasswordView(APIView):
         user.save()
 
         return Response({"message": "Password reset successful!"}, status=status.HTTP_200_OK)
+
+class ProfileUpdateView(generics.RetrieveUpdateAPIView):
+    serializer_class = CustomUserSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self):
+        return self.request.user  # Update only the logged-in user's profile
+
+class UserProfileDeleteView(generics.DestroyAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self):
+        return self.request.user  # Allow only the logged-in user to delete their profile
+
+    def delete(self, request, *args, **kwargs):
+        user = self.get_object()
+        user.delete()
+        return Response({"message": "Your profile has been deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
+
+class ApproveNGOView(APIView):
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request, user_id):
+        try:
+            ngo = CustomUser.objects.get(id=user_id, is_ngo=True)
+            ngo.is_approved = True
+            ngo.is_active = True  # ✅ Activate the account after approval
+            ngo.save()
+            return Response({"message": "NGO approved successfully."}, status=status.HTTP_200_OK)
+        except CustomUser.DoesNotExist:
+            return Response({"error": "NGO not found."}, status=status.HTTP_404_NOT_FOUND)
